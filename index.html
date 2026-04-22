@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>영상 운전 & 마이크로비트 컨트롤러</title>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;700&display=swap" rel="stylesheet">
+    <script src="https://cdn.tailwindcss.com"></script>
+
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; user-select: none; -webkit-user-select: none; }
+        body, html { width: 100%; background-color: #111; font-family: 'Noto Sans KR', sans-serif; color: white; overflow-x: hidden; scroll-behavior: smooth; }
+        section { width: 100vw; min-height: 100vh; display: flex; flex-direction: column; justify-content: center; align-items: center; position: relative; }
+
+        /* 비디오 영역 */
+        #animation-section { background-color: #000; overflow: hidden; }
+        #mainVideo { position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover; z-index: 1; }
+
+        .scroll-hint { position: absolute; bottom: 30px; left: 50%; transform: translateX(-50%); animation: bounce 2s infinite; color: rgba(255,255,255,0.8); cursor: pointer; z-index: 20; font-size: 14px; font-weight: bold; background: rgba(0,0,0,0.6); padding: 10px 20px; border-radius: 25px; border: 1px solid rgba(255,255,255,0.2); backdrop-filter: blur(5px); }
+        @keyframes bounce { 0%, 20%, 50%, 80%, 100% {transform: translateX(-50%) translateY(0);} 40% {transform: translateX(-50%) translateY(-10px);} 60% {transform: translateX(-50%) translateY(-5px);} }
+
+        /* 컨트롤 영역 */
+        #microbit-section { background-color: #1a1a1a; padding: 3rem 0; color: #eee; border-top: 2px solid #333; }
+        .mb-container { width: 90%; max-width: 800px; background: rgba(255,255,255,0.05); padding: 2.5rem 2rem; border-radius: 30px; border: 1px solid rgba(255,255,255,0.1); text-align: center; }
+
+        .pad { display: grid; grid-template-columns: repeat(3, 70px); grid-gap: 12px; justify-content: center; margin: 2rem auto; }
+        .pad button { height: 70px; border: 1px solid rgba(255,255,255,0.2); background: rgba(255,255,255,0.1); color: white; border-radius: 12px; font-size: 24px; font-weight: bold; transition: all 0.2s; cursor: pointer; display: flex; justify-content: center; align-items: center; }
+        .pad button:active, .pad button.active-command { background: #e74c3c; color: #fff; box-shadow: 0 0 15px #e74c3c; transform: scale(0.95); border-color: #e74c3c; }
+        .pad button.stop-btn { font-size: 16px; background: rgba(231, 76, 60, 0.2); }
+
+        .mb-status { font-size: 0.9rem; color: #00e5ff; margin-bottom: 1rem; }
+        .mb-messages { display: flex; flex-direction: column; gap: 8px; margin-bottom: 1.5rem; }
+        .mb-msg-box { padding: 10px 15px; border-radius: 10px; font-size: 0.95rem; text-align: left; }
+        #sent { background: rgba(0, 229, 255, 0.1); color: #00e5ff; border: 1px solid rgba(0, 229, 255, 0.3); }
+        #received { background: rgba(41, 121, 255, 0.1); color: #2979ff; border: 1px solid rgba(41, 121, 255, 0.3); }
+
+        #transcript { background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.1); padding: 1rem; border-radius: 12px; min-height: 80px; margin-bottom: 1.5rem; text-align: left; line-height: 1.6; font-size: 1rem; }
+        #transcript .interim { color: #666; }
+
+        .btn-action { margin: 5px; padding: 10px 20px; border-radius: 10px; font-weight: bold; color: white; transition: 0.3s; cursor: pointer; border: none; }
+        .btn-action:disabled { opacity: 0.5; cursor: not-allowed; }
+        #connectButton { background: #4caf50; }
+        #disconnectButton { background: #f44336; }
+        #speechButton { background: #2196f3; }
+        #speechButton.recording { background: #e91e63; animation: pulse 1.5s infinite; }
+        
+        @keyframes pulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(233, 30, 99, 0.7); } 70% { box-shadow: 0 0 0 10px rgba(233, 30, 99, 0); } }
+    </style>
+</head>
+<body>
+
+    <section id="animation-section">
+        <video id="mainVideo" src="정지.mp4" autoplay muted playsinline></video>
+        <div class="scroll-hint" onclick="window.scrollTo(0, window.innerHeight)">
+            ▼ 아래로 스크롤하여 조종하기 ▼
+        </div>
+    </section>
+
+    <section id="microbit-section">
+        <div class="mb-container">
+            <h1 class="text-2xl font-bold mb-6 text-white">카트 조종 및 연결</h1>
+
+            <div class="pad">
+                <div></div>
+                <button data-cmd="w" title="전진">⬆️</button>
+                <div></div>
+                <button data-cmd="a" title="좌회전">⬅️</button>
+                <button data-cmd="x" class="stop-btn" title="정지">정지(x)</button>
+                <button data-cmd="d" title="우회전">➡️</button>
+                <div></div>
+                <button data-cmd="s" title="후진">⬇️</button>
+                <div></div>
+            </div>
+
+            <hr class="border-white/10 my-8">
+
+            <h2 class="text-lg font-bold mb-4 text-white">음성 인식 & 마이크로비트 상태</h2>
+
+            <div id="status" class="mb-status">디바이스: 미연결</div>
+            <div id="speechStatus" class="mb-status" style="color:#aaa;">음성인식 대기 중</div>
+
+            <div class="mb-messages">
+                <div id="sent" class="mb-msg-box">HTML → 마이크로비트: –</div>
+                <div id="received" class="mb-msg-box">마이크로비트 → HTML: –</div>
+            </div>
+
+            <div id="transcript">
+                <span style="color:#666;">음성 명령 (예: 전진, 후진, 멈춰, 좌회전 등) 결과 표시</span>
+            </div>
+
+            <div class="flex flex-wrap justify-center mb-6">
+                <button id="connectButton" class="btn-action">블루투스 연결</button>
+                <button id="disconnectButton" class="btn-action" disabled>연결 해제</button>
+                <button id="speechButton" class="btn-action" disabled>음성인식 시작</button>
+            </div>
+
+            <div class="bg-black/30 p-4 rounded-xl text-left text-sm border border-white/10 mt-6">
+                <p class="font-bold text-cyan-400 mb-2">사용 가능한 조작 및 음성 명령어:</p>
+                <p>⬆️ <b>전진 / 앞으로</b> (키보드: W, ↑) &nbsp; | &nbsp; ⬇️ <b>후진 / 뒤로</b> (키보드: S, ↓)</p>
+                <p class="mt-1">⬅️ <b>좌회전 / 왼쪽</b> (키보드: A, ←) &nbsp; | &nbsp; ➡️ <b>우회전 / 오른쪽</b> (키보드: D, →)</p>
+                <p class="mt-1">🛑 <b>멈춰 / 정지</b> (키보드: X, Spacebar)</p>
+            </div>
+        </div>
+        
+        <footer class="mt-12 text-gray-500 text-xs text-center">
+            ©2026 용문중학교 교사 정영천 &nbsp;|&nbsp; <a href="https://www.youtube.com/@01000a" target="_blank" style="color:#00e5ff;">https://www.youtube.com/@01000a</a>
+        </footer>
+    </section>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            const videoElement = document.getElementById("mainVideo");
+            videoElement.loop = false;
+
+            const speechStatusEl = document.getElementById('speechStatus');
+            
+            let recognition = null;
+            let isRecognizing = false;
+            let isSpeechIntended = false; 
+            let finalTranscriptGlobal = '';
+            let restartTimer = null;
+            let actionTimeout = null;
+            let isActionPlaying = false; 
+            let currentCmd = null;
+            
+            // 🌟 새로 추가된 변수: 마이크는 켜두되 명령만 무시하는 모드
+            let isListeningPaused = false; 
+
+            const videoMap = {
+                'w': '전진.mp4', 's': '후진.mp4',
+                'a': '좌회전.mp4', 'd': '우회전.mp4', 'x': '정지.mp4'
+            };
+
+            function executeCommand(cmd) {
+                if (isActionPlaying) return;
+                if (currentCmd === cmd) return;
+
+                currentCmd = cmd;
+                isActionPlaying = true; 
+
+                const targetVideo = videoMap[cmd];
+                if (targetVideo) {
+                    videoElement.src = targetVideo;
+                    videoElement.muted = false;
+                    videoElement.loop = false; 
+                    videoElement.play().catch(e => console.log("재생 오류:", e));
+                }
+
+                if (isConnected) sendCommand(cmd);
+
+                document.querySelectorAll('.pad button').forEach(b => b.classList.remove('active-command'));
+                const activeBtn = document.querySelector(`.pad button[data-cmd="${cmd}"]`);
+                if (activeBtn) activeBtn.classList.add('active-command');
+
+                // 🌟 변경됨: 마이크를 끄지 않고 무시(Pause) 모드로 전환
+                if (isRecognizing) {
+                    isListeningPaused = true;
+                    speechStatusEl.textContent = '명령 수행 중... (6초간 소리 무시)';
+                }
+
+                clearTimeout(actionTimeout);
+                actionTimeout = setTimeout(() => {
+                    isActionPlaying = false; 
+                    isListeningPaused = false; // 6초 후 무시 모드 해제 (귀 다시 열기)
+
+                    if (isRecognizing && isSpeechIntended) {
+                        speechStatusEl.textContent = '듣고 있습니다... 명령을 말해보세요!';
+                    } else if (!isSpeechIntended) {
+                        speechStatusEl.textContent = '음성인식 대기 중';
+                    }
+                }, 6000); 
+            }
+
+            const pads = document.querySelectorAll('.pad button[data-cmd]');
+            pads.forEach(btn => {
+                const cmd = btn.dataset.cmd;
+                const startEvt = (e) => { 
+                    e.preventDefault(); 
+                    executeCommand(cmd); 
+                    if (navigator.vibrate) navigator.vibrate(20);
+                };
+                btn.addEventListener('mousedown', startEvt);
+                btn.addEventListener('touchstart', startEvt, {passive: false}); 
+            });
+
+            const keyMap = {
+                'ArrowUp': 'w', 'w': 'w', 'W': 'w',
+                'ArrowDown': 's', 's': 's', 'S': 's',
+                'ArrowLeft': 'a', 'a': 'a', 'A': 'a',
+                'ArrowRight': 'd', 'd': 'd', 'D': 'd',
+                ' ': 'x', 'Escape': 'x', 'x': 'x', 'X': 'x' 
+            };
+
+            document.addEventListener('keydown', (e) => {
+                if (e.repeat) return;
+                const cmd = keyMap[e.key];
+                if (cmd) {
+                    if(['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code)) {
+                        e.preventDefault();
+                    }
+                    executeCommand(cmd);
+                }
+            });
+
+            const UART_SERVICE_UUID = '6e400001-b5a3-f393-e0a9-e50e24dcca9e';
+            let device, txChar, rxChar;
+            window.isConnected = false;
+            const statusEl = document.getElementById('status');
+            const sentEl = document.getElementById('sent'), receivedEl = document.getElementById('received'), transcriptEl = document.getElementById('transcript');
+            const btnConnect = document.getElementById('connectButton'), btnDisc = document.getElementById('disconnectButton'), btnSpeech = document.getElementById('speechButton');
+
+            function updateConnectionState(connected) {
+                isConnected = connected; btnConnect.disabled = connected; btnDisc.disabled = !connected;
+                statusEl.textContent = connected ? '디바이스 연결됨' : '디바이스 연결 해제됨';
+                if (!connected && isRecognizing && recognition) {
+                    isSpeechIntended = false;
+                    recognition.stop();
+                }
+            }
+
+            btnConnect.addEventListener('click', async () => {
+                try {
+                    statusEl.textContent = '디바이스 검색 중…';
+                    device = await navigator.bluetooth.requestDevice({ filters: [{ namePrefix: 'BBC micro:bit' }], optionalServices: [UART_SERVICE_UUID] });
+                    const server = await device.gatt.connect(), svc = await server.getPrimaryService(UART_SERVICE_UUID), chars = await svc.getCharacteristics();
+                    chars.forEach(ch => {
+                        const p = ch.properties;
+                        if ((p.write || p.writeWithoutResponse) && !txChar) txChar = ch;
+                        if ((p.notify || p.indicate) && !rxChar) rxChar = ch;
+                    });
+                    rxChar.addEventListener('characteristicvaluechanged', e => {
+                        receivedEl.textContent = `마이크로비트 → HTML: ${new TextDecoder().decode(e.target.value).trim()}`;
+                    });
+                    await rxChar.startNotifications();
+                    updateConnectionState(true);
+                } catch (e) { statusEl.textContent = 'Error: ' + e.message; }
+            });
+
+            btnDisc.addEventListener('click', () => { if (device?.gatt.connected) device.gatt.disconnect(); updateConnectionState(false); });
+
+            async function sendCommand(cmd) {
+                if (!isConnected || !txChar) return;
+                try {
+                    await txChar.writeValueWithoutResponse(new TextEncoder().encode(cmd + '\n'));
+                    sentEl.textContent = `HTML → 마이크로비트: ${cmd}`;
+                } catch (e) { statusEl.textContent = 'TX Error: ' + e.message; }
+            }
+
+            const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+
+            if (SpeechRecognition) {
+                btnSpeech.disabled = false;
+                recognition = new SpeechRecognition();
+                recognition.lang = 'ko-KR'; recognition.continuous = true; recognition.interimResults = true;
+
+                recognition.onstart = () => { 
+                    isRecognizing = true; 
+                    if (!isActionPlaying) speechStatusEl.textContent = '듣고 있습니다... 명령을 말해보세요!'; 
+                    btnSpeech.textContent = '음성인식 중지'; 
+                    btnSpeech.classList.add('recording'); 
+                };
+
+                recognition.onend = () => {
+                    isRecognizing = false;
+                    if (isSpeechIntended) {
+                        // Web Speech API가 일정 시간 조용해서 자동으로 끊어졌을 때 재시작
+                        restartTimer = setTimeout(() => { try { recognition.start(); } catch(e) {} }, 300); 
+                    } else {
+                        speechStatusEl.textContent = '음성인식 대기 중'; 
+                        btnSpeech.textContent = '음성인식 시작'; 
+                        btnSpeech.classList.remove('recording'); 
+                    }
+                };
+
+                recognition.onerror = (e) => { 
+                    if (e.error !== 'aborted' && e.error !== 'no-speech') { 
+                        if (!isActionPlaying) {
+                            speechStatusEl.textContent = '오류: ' + e.error; 
+                        }
+                    } 
+                };
+
+                recognition.onresult = (event) => {
+                    // 🌟 변경됨: 무시 모드일 때는 영상에서 나는 소리가 텍스트로 찍히거나 명령을 실행하지 않도록 바로 차단
+                    if (isListeningPaused) return; 
+
+                    let interimTranscript = '';
+                    for (let i = event.resultIndex; i < event.results.length; ++i) {
+                        const transcript = event.results[i][0].transcript;
+                        if (event.results[i].isFinal) {
+                            finalTranscriptGlobal += transcript;
+                            const text = transcript.trim().replace(/\s/g, '');
+                            let command = null;
+                            if (text.includes('전진') || text.includes('앞으로')) command = 'w';
+                            else if (text.includes('후진') || text.includes('뒤로')) command = 's';
+                            else if (text.includes('좌회전') || text.includes('왼쪽')) command = 'a';
+                            else if (text.includes('우회전') || text.includes('오른쪽')) command = 'd';
+                            else if (text.includes('멈춰') || text.includes('정지')) command = 'x';
+
+                            if (command) executeCommand(command);
+                        } else { interimTranscript += transcript; }
+                    }
+                    transcriptEl.innerHTML = finalTranscriptGlobal + `<span class="interim">${interimTranscript}</span>`;
+                    transcriptEl.scrollTop = transcriptEl.scrollHeight;
+                };
+
+                btnSpeech.addEventListener('click', () => {
+                    if (isSpeechIntended) { 
+                        isSpeechIntended = false; 
+                        clearTimeout(restartTimer); 
+                        if (isRecognizing) recognition.stop();
+                    } else { 
+                        isSpeechIntended = true; 
+                        finalTranscriptGlobal = ''; 
+                        transcriptEl.innerHTML = '<span style="color:#666;">듣고 있습니다...</span>'; 
+                        try { recognition.start(); } catch(e) {} 
+                    }
+                });
+            } else {
+                transcriptEl.innerHTML = '<span style="color:#ff4444;">이 브라우저는 음성 인식을 지원하지 않습니다. Chrome을 사용해주세요.</span>';
+            }
+        });
+    </script>
+</body>
+</html>
