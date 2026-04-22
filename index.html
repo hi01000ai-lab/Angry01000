@@ -122,9 +122,6 @@
             let actionTimeout = null;
             let isActionPlaying = false; 
             let currentCmd = null;
-            
-            // 🌟 새로 추가된 변수: 마이크는 켜두되 명령만 무시하는 모드
-            let isListeningPaused = false; 
 
             const videoMap = {
                 'w': '전진.mp4', 's': '후진.mp4',
@@ -152,19 +149,20 @@
                 const activeBtn = document.querySelector(`.pad button[data-cmd="${cmd}"]`);
                 if (activeBtn) activeBtn.classList.add('active-command');
 
-                // 🌟 변경됨: 마이크를 끄지 않고 무시(Pause) 모드로 전환
-                if (isRecognizing) {
-                    isListeningPaused = true;
-                    speechStatusEl.textContent = '명령 수행 중... (6초간 소리 무시)';
+                // 🌟 마이크 강제 종료 로직 (스마트폰 하울링 방지용)
+                if (isRecognizing && recognition) {
+                    recognition.abort(); // stop()보다 더 즉각적으로 수음을 차단합니다.
+                    speechStatusEl.textContent = '명령 수행 중... (6초간 마이크 일시정지)';
                 }
 
                 clearTimeout(actionTimeout);
                 actionTimeout = setTimeout(() => {
                     isActionPlaying = false; 
-                    isListeningPaused = false; // 6초 후 무시 모드 해제 (귀 다시 열기)
-
-                    if (isRecognizing && isSpeechIntended) {
+                    
+                    // 🌟 6초 후 마이크 다시 켜기
+                    if (isSpeechIntended && !isRecognizing && recognition) {
                         speechStatusEl.textContent = '듣고 있습니다... 명령을 말해보세요!';
+                        try { recognition.start(); } catch(e) {}
                     } else if (!isSpeechIntended) {
                         speechStatusEl.textContent = '음성인식 대기 중';
                     }
@@ -263,8 +261,10 @@
                 recognition.onend = () => {
                     isRecognizing = false;
                     if (isSpeechIntended) {
-                        // Web Speech API가 일정 시간 조용해서 자동으로 끊어졌을 때 재시작
-                        restartTimer = setTimeout(() => { try { recognition.start(); } catch(e) {} }, 300); 
+                        // 6초 차단 중이 아닐 때, 브라우저가 임의로 끊으면 0.3초 후 자동 재시작
+                        if (!isActionPlaying) {
+                            restartTimer = setTimeout(() => { try { recognition.start(); } catch(e) {} }, 300); 
+                        }
                     } else {
                         speechStatusEl.textContent = '음성인식 대기 중'; 
                         btnSpeech.textContent = '음성인식 시작'; 
@@ -281,9 +281,6 @@
                 };
 
                 recognition.onresult = (event) => {
-                    // 🌟 변경됨: 무시 모드일 때는 영상에서 나는 소리가 텍스트로 찍히거나 명령을 실행하지 않도록 바로 차단
-                    if (isListeningPaused) return; 
-
                     let interimTranscript = '';
                     for (let i = event.resultIndex; i < event.results.length; ++i) {
                         const transcript = event.results[i][0].transcript;
@@ -308,7 +305,7 @@
                     if (isSpeechIntended) { 
                         isSpeechIntended = false; 
                         clearTimeout(restartTimer); 
-                        if (isRecognizing) recognition.stop();
+                        if (isRecognizing) recognition.abort();
                     } else { 
                         isSpeechIntended = true; 
                         finalTranscriptGlobal = ''; 
